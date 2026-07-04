@@ -1,7 +1,10 @@
-from ollama import Client
 import argparse
 import sys
+import time
 from pathlib import Path
+
+from ollama import Client
+
 from config_read import load_config
 
 def generate_architecture(
@@ -56,12 +59,14 @@ def architecture_request():
     if not args.dir.exists():
         print(f"ERROR: Указанная папка не существует", file=sys.stderr)
         sys.exit(1)
-    if not (args.dir + Path('TASK.md')).exists():
+    if not (args.dir / Path('TASK.md')).exists():
         print(f"ERROR: TASK.md нет в {args.dir.resolve()}", file=sys.stderr)
         sys.exit(1)
 
+    start = time.perf_counter()
+
     config = load_config('model.config')
-    task_content = (args.dir + Path('TASK.md')).read_text()
+    task_content = (args.dir / Path('TASK.md')).read_text()
     architecture_data = generate_architecture(
         task_content=task_content,
         model=config['OLLAMA_MODEL'],
@@ -70,11 +75,17 @@ def architecture_request():
         client=Client()
     )
 
-    csv_data = architecture_data.split('```csv')[-1]
-    architecture_md = '```csv'.join(architecture_data.split('```csv')[:-1])
+    end = time.perf_counter()
+    if end - start > 60:
+        print(f"Запрос выполнен за {int((end - start) // 60)} минут {int((end - start) % 60)} секунд")
+    else:
+        print(f"Запрос выполнен за {int(end - start)} секунд")
 
-    (args.dir + Path('FILE_STRUCTURE.csv')).write_text(csv_data)
-    (args.dir + Path('ARCHITECTURE.md')).write_text(architecture_md)
+    csv_data = architecture_data.split('```csv')[-1]
+    architecture_md = '\n'.join('```csv'.join(architecture_data.split('```csv')[:-1]).split('\n')[:-2])
+
+    (args.dir / Path('FILE_STRUCTURE.csv')).write_text(csv_data)
+    (args.dir / Path('ARCHITECTURE.md')).write_text(architecture_md)
 
 
 if __name__ == "__main__":
