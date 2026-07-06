@@ -107,8 +107,8 @@ def code_review_request(dir : Path, check_finished : bool, create_tests : bool):
         user_prompt += f"\nPriority: {row['priority']}"
         user_prompt += f"\nDepends on: {row['depends_on']}"
         user_prompt += f"\nNotes: {row['notes']}"
-        if Path(row['path']).exists():
-            user_prompt += f"\nCode:\n{Path(row['path']).read_text()}"
+        if (dir / Path(row['path'])).exists():
+            user_prompt += f"\nCode:\n{(dir /Path(row['path'])).read_text()}"
 
     review_data = request_generate(
         system_prompt=system_prompt,
