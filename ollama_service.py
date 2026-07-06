@@ -92,9 +92,8 @@ def code_review_request(dir : Path, check_finished : bool, create_tests : bool):
         #Нужно доработать выбранную группу файлов
         files_to_check_df = pd.DataFrame(columns=files_df.columns)
         for _, row in files_df.iterrows():
-            if Path(row['path']).exists():
-                if not (check_finished ^ bool(row['finished'])): #xnor
-                    files_to_check_df.loc[len(files_to_check_df)] = row
+            if not (check_finished ^ bool(row['finished'])): #xnor
+                files_to_check_df.loc[len(files_to_check_df)] = row
     
     system_prompt = Path('REVIEW_SYS_PRPT.md').read_text()
     if create_tests:
@@ -108,7 +107,8 @@ def code_review_request(dir : Path, check_finished : bool, create_tests : bool):
         user_prompt += f"\nPriority: {row['priority']}"
         user_prompt += f"\nDepends on: {row['depends_on']}"
         user_prompt += f"\nNotes: {row['notes']}"
-        user_prompt += f"\nCode:\n{Path(row['path']).read_text()}"
+        if Path(row['path']).exists():
+            user_prompt += f"\nCode:\n{Path(row['path']).read_text()}"
 
     review_data = request_generate(
         system_prompt=system_prompt,
