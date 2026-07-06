@@ -8,24 +8,22 @@ from ollama import Client
 
 from config_read import load_config
 
-def generate_architecture(
-    task_content,
+def request_generate(
+    system_prompt,
+    user_prompt,
     model,
     client,
     temperature = 0.25,
     num_ctx = 32768,
 ):
-    system_prompt = Path('SYS_PRPT_ARCHITECTURE.md').read_text()
-    user_prompt = f"""
-    TASK.md content:
-    \n{task_content}\n
-    Generate the complete ARCHITECTURE.md now following all instructions above. Remember: start directly with `# MindVault Architecture` and output pure Markdown only."""
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
     ]
 
     try:
+        start = time.perf_counter()
+
         response = client.chat(
             model=model,
             messages=messages,
@@ -37,6 +35,12 @@ def generate_architecture(
             },
         )
         content = response["message"]["content"].strip()
+
+        end = time.perf_counter()
+        if end - start > 60:
+            print(f"Запрос выполнен за {int((end - start) // 60)} минут {int((end - start) % 60)} секунд")
+        else:
+            print(f"Запрос выполнен за {int(end - start)} секунд")
 
         return content
 
@@ -56,23 +60,16 @@ def architecture_request(dir : Path):
         print(f"ERROR: TASK.md нет в {dir.resolve()}", file=sys.stderr)
         sys.exit(1)
 
-    start = time.perf_counter()
-
     config = load_config('model.config')
     task_content = (dir / Path('TASK.md')).read_text()
-    architecture_data = generate_architecture(
-        task_content=task_content,
+    architecture_data = request_generate(
+        system_prompt=Path('SYS_PRPT_ARCHITECTURE.md').read_text(),
+        task_content=Path('USR_PRPT_ARCHITECURE.md').read_text().format(task_content),
         model=config['OLLAMA_MODEL'],
         temperature=config['TEMPERATURE'],
         num_ctx=config['NUM_CTX'],
         client=Client()
     )
-
-    end = time.perf_counter()
-    if end - start > 60:
-        print(f"Запрос выполнен за {int((end - start) // 60)} минут {int((end - start) % 60)} секунд")
-    else:
-        print(f"Запрос выполнен за {int(end - start)} секунд")
 
     csv_data = architecture_data.split('```csv')[-1]
     if csv_data.endswith('```'):
@@ -85,7 +82,15 @@ def architecture_request(dir : Path):
     (args.dir / Path('ARCHITECTURE.md')).write_text(architecture_md)
 
 
-def state_check_request(dir : Path):
+def generate_state_check(
+    task_content,
+    model,
+    client,
+    temperature = 0.25,
+    num_ctx = 32768,
+)
+
+def state_check_request(dir : Path, check_finished : bool, create_tests : bool):
     """
     По ARCHITECTURE.md и FILE_STRUCTURE.csv проверяет нынешнее состояние проекта
     исходя из чего предлагает последующие действия
@@ -94,19 +99,19 @@ def state_check_request(dir : Path):
     files_df = pd.read_csv(dir / Path('FILE_STRUCTURE.csv'))
     if files_df['finished'].astype(bool).all():
         #TODO Сделать проверку всех файлов проекта, так как что-то не работает
+        #TODO А также создание тестов при необходимости
         pass
     else:
-        unfinished_files_df = pd.DataFrame(columns=files_df.columns)
+        files_to_check_df = pd.DataFrame(columns=files_df.columns)
         for _, row in files_df.iterrows():
             if Path(row['path']).exists():
-                if not bool(row['finished']):
-                    unfinished_files_df.loc[len(unfinished_files_df)] = row
+                if not (check_finished ^ bool(row['finished'])): #xnor
+                        files_to_check_df.loc[len(files_to_check_df)] = row
         #TODO Сделать проверку тех файлов, которые не доработаны
-        #TODO Сделать проверку файлов, которые существуют
         #TODO Сделать создание тестов по файлам, которые существуют или которые будут
 
 
-    print(unfinished_files_df)
+    print(files_to_check_df)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -126,10 +131,17 @@ if __name__ == "__main__":
     parser.add_argument(
         "--check-finished",
         type=bool,
-        help="Указывает, нужно ли проверить готовые файлы, или проверить не готовые"
+        help="Указывает, нужно ли проверить готовые файлы, или проверить не готовые",
+        default=False
+    )
+    parser.add_argument(
+        "--create-tests",
+        type=bool,
+        help="Указывает, нужно ли создавать тесты для файлов для проверки",
+        default=False
     )
     args = parser.parse_args()
     if args.mode == 'A':
         architecture_request(args.dir)
     else:
-        state_check_request(args.dir)
+        state_check_request(args.dir, args.check_finished, args.create_tests)
