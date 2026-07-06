@@ -11,11 +11,12 @@ from config_read import load_config
 def request_generate(
     system_prompt,
     user_prompt,
-    model,
     client,
-    temperature = 0.25,
-    num_ctx = 32768,
 ):
+    config = load_config('model.config')
+    model = config['OLLAMA_MODEL']
+    temperature = temperature=config['TEMPERATURE']
+    num_ctx = num_ctx=config['NUM_CTX']
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
@@ -60,14 +61,10 @@ def architecture_request(dir : Path):
         print(f"ERROR: TASK.md нет в {dir.resolve()}", file=sys.stderr)
         sys.exit(1)
 
-    config = load_config('model.config')
     task_content = (dir / Path('TASK.md')).read_text()
     architecture_data = request_generate(
-        system_prompt=Path('SYS_PRPT_ARCHITECTURE.md').read_text(),
-        task_content=Path('USR_PRPT_ARCHITECURE.md').read_text().format(task_content),
-        model=config['OLLAMA_MODEL'],
-        temperature=config['TEMPERATURE'],
-        num_ctx=config['NUM_CTX'],
+        system_prompt=Path('ARCHITECTURE_SYS_PRPT.md').read_text(),
+        user_prompt=Path('ARCHITECTURE_USR_PRPT.md').read_text().format(task_content),
         client=Client()
     )
 
@@ -76,21 +73,12 @@ def architecture_request(dir : Path):
         csv_data = csv_data[:-3]
     if csv_data.startswith('\n'):
         csv_data = csv_data[1:]
-    architecture_md = '\n'.join('```csv'.join(architecture_data.split('```csv')[:-1]).split('\n')[:-2])
+    architecture_md = '\n'.join('```csv'.join(architecture_data.split('```csv')[:-1]).split('\n')[:-3])
 
     (args.dir / Path('FILE_STRUCTURE.csv')).write_text(csv_data)
     (args.dir / Path('ARCHITECTURE.md')).write_text(architecture_md)
 
-
-def generate_state_check(
-    task_content,
-    model,
-    client,
-    temperature = 0.25,
-    num_ctx = 32768,
-)
-
-def state_check_request(dir : Path, check_finished : bool, create_tests : bool):
+def code_review_request(dir : Path, check_finished : bool, create_tests : bool):
     """
     По ARCHITECTURE.md и FILE_STRUCTURE.csv проверяет нынешнее состояние проекта
     исходя из чего предлагает последующие действия
@@ -98,20 +86,37 @@ def state_check_request(dir : Path, check_finished : bool, create_tests : bool):
 
     files_df = pd.read_csv(dir / Path('FILE_STRUCTURE.csv'))
     if files_df['finished'].astype(bool).all():
-        #TODO Сделать проверку всех файлов проекта, так как что-то не работает
-        #TODO А также создание тестов при необходимости
-        pass
+        #Нужно проверить все готовые файлы на доработки
+        files_to_check_df = files_df.copy()
     else:
+        #Нужно доработать выбранную группу файлов
         files_to_check_df = pd.DataFrame(columns=files_df.columns)
         for _, row in files_df.iterrows():
             if Path(row['path']).exists():
                 if not (check_finished ^ bool(row['finished'])): #xnor
-                        files_to_check_df.loc[len(files_to_check_df)] = row
-        #TODO Сделать проверку тех файлов, которые не доработаны
-        #TODO Сделать создание тестов по файлам, которые существуют или которые будут
+                    files_to_check_df.loc[len(files_to_check_df)] = row
+    
+    system_prompt = Path('REVIEW_SYS_PRPT.md').read_text()
+    if create_tests:
+        system_prompt += '\n' + Path('REVIEW_TEST_SYS_PRPT.md').read_text()
+    
+    user_prompt = Path('REVIEW_USR_PRPT.md').read_text().format((dir / Path('ARCHITECTURE.md')).read_text())
+    for _, row in files_to_check_df.iterrows():
+        user_prompt += f"\n\n### {row['path']}" 
+        user_prompt += f"\nResponsibility: {row['responsibility']}"
+        user_prompt += f"\nExpected content: {row['expected_content']}"
+        user_prompt += f"\nPriority: {row['priority']}"
+        user_prompt += f"\nDepends on: {row['depends_on']}"
+        user_prompt += f"\nNotes: {row['notes']}"
+        user_prompt += f"\nCode:\n{Path(row['path']).read_text()}"
 
+    review_data = request_generate(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        client=Client()
+    )
 
-    print(files_to_check_df)
+    (args.dir / Path('CURRENT_STATE.md')).write_text(review_data)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -144,4 +149,4 @@ if __name__ == "__main__":
     if args.mode == 'A':
         architecture_request(args.dir)
     else:
-        state_check_request(args.dir, args.check_finished, args.create_tests)
+        code_review_request(args.dir, args.check_finished, args.create_tests)
